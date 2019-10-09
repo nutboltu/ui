@@ -1,4 +1,4 @@
-import React, { KeyboardEvent, Component, ReactElement } from 'react';
+import React, { KeyboardEvent, useState, useEffect } from 'react';
 import { withRouter, RouteComponentProps } from 'react-router-dom';
 import { css } from 'emotion';
 
@@ -9,6 +9,8 @@ import debounce from 'lodash/debounce';
 import AutoComplete from '../AutoComplete';
 import colors from '../../utils/styles/colors';
 import { callSearch } from '../../utils/calls';
+import { useLoadAndError } from './useLoadAndError';
+import SearchAbortController from './SearchAbortController';
 
 export interface State {
   search: string;
@@ -18,116 +20,60 @@ export interface State {
   error: boolean;
 }
 
-export type cancelAllSearchRequests = () => void;
-export type handlePackagesClearRequested = () => void;
-export type handleSearch = (event: KeyboardEvent<HTMLInputElement>, { newValue, method }: { newValue: string; method: string }) => void;
-export type handleClickSearch = (event: KeyboardEvent<HTMLInputElement>, { suggestionValue, method }: { suggestionValue: object[]; method: string }) => void;
-export type handleFetchPackages = ({ value: string }) => Promise<void>;
-export type onBlur = (event: KeyboardEvent<HTMLInputElement>) => void;
-
 const CONSTANTS = {
   API_DELAY: 300,
   PLACEHOLDER_TEXT: 'Search Packages',
   ABORT_ERROR: 'AbortError',
 };
 
-export class Search extends Component<RouteComponentProps<{}>, State> {
-  constructor(props: RouteComponentProps<{}>) {
-    super(props);
-    this.state = {
-      search: '',
-      suggestions: [],
-      // loading: A boolean value to indicate that request is in pending state.
-      loading: false,
-      // loaded: A boolean value to indicate that result has been loaded.
-      loaded: false,
-      // error: A boolean value to indicate API error.
-      error: false,
-    };
-    this.requestList = [];
-  }
+const Search = (props: RouteComponentProps<{}>): React.ReactElement => {
+  const [search, setSearch] = useState<string>('');
+  const [suggestions, setSuggestions] = useState<unknown[]>([]);
+  const [loading, loaded, error, setLoadAndError] = useLoadAndError();
 
-  public render(): ReactElement<HTMLElement> {
-    const { suggestions, search, loaded, loading, error } = this.state;
-
-    return (
-      <AutoComplete
-        color={colors.white}
-        onBlur={this.handleOnBlur}
-        onChange={this.handleSearch}
-        onCleanSuggestions={this.handlePackagesClearRequested}
-        onClick={this.handleClickSearch}
-        onSuggestionsFetch={debounce(this.handleFetchPackages, CONSTANTS.API_DELAY)}
-        placeholder={CONSTANTS.PLACEHOLDER_TEXT}
-        startAdornment={this.getAdorment()}
-        suggestions={suggestions}
-        suggestionsError={error}
-        suggestionsLoaded={loaded}
-        suggestionsLoading={loading}
-        value={search}
-      />
-    );
-  }
-
-  /**
-   * Cancel all the requests which are in pending state.
-   */
-  private cancelAllSearchRequests: cancelAllSearchRequests = () => {
-    this.requestList.forEach(request => request.abort());
-    this.requestList = [];
-  };
-
+  useEffect(() => {
+    /**
+     * A use case where User keeps adding and removing value in input field,
+     * so we cancel all the existing requests when input is empty.
+     */
+    if (search.length === 0) {
+      SearchAbortController.cancelAllSearchRequests();
+    }
+  }, [search]);
   /**
    * Cancel all the request from list and make request list empty.
    */
-  private handlePackagesClearRequested: handlePackagesClearRequested = () => {
-    this.setState({
-      suggestions: [],
-    });
+  const handlePackagesClearRequested = (): void => {
+    setSuggestions([]);
   };
 
   /**
    * onChange method for the input element.
    */
-  private handleSearch: handleSearch = (event, { newValue, method }) => {
+  const handleSearch = (event: KeyboardEvent<HTMLInputElement>, { newValue, method }: { newValue: string; method: string }): void => {
     // stops event bubbling
     event.stopPropagation();
     if (method === 'type') {
       const value = newValue.trim();
-      this.setState(
-        {
-          search: value,
-          loading: true,
-          loaded: false,
-          error: false,
-        },
-        () => {
-          /**
-           * A use case where User keeps adding and removing value in input field,
-           * so we cancel all the existing requests when input is empty.
-           */
-          if (value.length === 0) {
-            this.cancelAllSearchRequests();
-          }
-        }
-      );
+      setSearch(value);
+      setLoadAndError(true, false, false);
     }
   };
 
   /**
    * When an user select any package by clicking or pressing return key.
    */
-  private handleClickSearch = (
+  const handleClickSearch = (
     event: React.KeyboardEvent<HTMLInputElement>,
     { suggestionValue, method }: { suggestionValue: string[]; method: string }
-  ): void | undefined => {
-    const { history } = this.props;
+  ): void => {
+    const { history } = props;
     // stops event bubbling
     event.stopPropagation();
     switch (method) {
       case 'click':
       case 'enter':
-        this.setState({ search: '' });
+        setSearch('');
         history.push(`/-/web/detail/${suggestionValue}`);
         break;
     }
@@ -135,66 +81,64 @@ export class Search extends Component<RouteComponentProps<{}>, State> {
 
   /**
    * Fetch packages from API.
-   * For AbortController see: https://developer.mozilla.org/en-US/docs/Web/API/AbortController
    */
-  private handleFetchPackages: handleFetchPackages = async ({ value }) => {
+  const handleFetchPackages = async ({ value }: { value: string }): Promise<void> => {
     try {
-      // @ts-ignore
-      const controller = new window.AbortController();
-      const signal = controller.signal;
-      // Keep track of search requests.
-      this.requestList.push(controller);
+      const signal = SearchAbortController.addController();
       const suggestions = await callSearch(value, signal);
       // @ts-ignore
-      this.setState({
-        suggestions,
-        loaded: true,
-      });
+      setSuggestions(suggestions);
+      setLoadAndError(false, true, false);
     } catch (error) {
       /**
        * AbortError is not the API error.
        * It means browser has cancelled the API request.
        */
       if (error.name === CONSTANTS.ABORT_ERROR) {
-        this.setState({ error: false, loaded: false });
+        setLoadAndError(false, false, false);
       } else {
-        this.setState({ error: true, loaded: false });
+        setLoadAndError(false, false, true);
       }
-    } finally {
-      this.setState({ loading: false });
     }
   };
 
-  private requestList: AbortController[];
-
-  public getAdorment(): JSX.Element {
-    return (
-      <InputAdornment
-        className={css`
-          color: ${colors.white};
-        `}
-        position={'start'}>
-        <IconSearch />
-      </InputAdornment>
-    );
-  }
-
+  const getAdorment = (): React.ReactElement => (
+    <InputAdornment
+      className={css`
+        color: ${colors.white};
+      `}
+      position={'start'}>
+      <IconSearch />
+    </InputAdornment>
+  );
   /**
    * As user focuses out from input, we cancel all the request from requestList
    * and set the API state parameters to default boolean values.
    */
-  private handleOnBlur: onBlur = event => {
+  const handleOnBlur = (event: KeyboardEvent<HTMLInputElement>): void => {
     // stops event bubbling
     event.stopPropagation();
-    this.setState(
-      {
-        loaded: false,
-        loading: false,
-        error: false,
-      },
-      () => this.cancelAllSearchRequests()
-    );
+    setLoadAndError(false, false, false);
+    SearchAbortController.cancelAllSearchRequests();
   };
-}
+
+  return (
+    <AutoComplete
+      color={colors.white}
+      onBlur={handleOnBlur}
+      onChange={handleSearch}
+      onCleanSuggestions={handlePackagesClearRequested}
+      onClick={handleClickSearch}
+      onSuggestionsFetch={debounce(handleFetchPackages, CONSTANTS.API_DELAY)}
+      placeholder={CONSTANTS.PLACEHOLDER_TEXT}
+      startAdornment={getAdorment()}
+      suggestions={suggestions}
+      suggestionsError={error}
+      suggestionsLoaded={loaded}
+      suggestionsLoading={loading}
+      value={search}
+    />
+  );
+};
 
 export default withRouter(Search);
