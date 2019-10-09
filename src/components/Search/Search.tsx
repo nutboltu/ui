@@ -26,7 +26,7 @@ const CONSTANTS = {
   ABORT_ERROR: 'AbortError',
 };
 
-const Search = (props: RouteComponentProps<{}>): React.ReactElement => {
+export const SearchComponent = (props: RouteComponentProps<{}>): React.ReactElement => {
   const [search, setSearch] = useState<string>('');
   const [suggestions, setSuggestions] = useState<unknown[]>([]);
   const [loading, loaded, error, setLoadAndError] = useLoadAndError();
@@ -141,4 +141,4 @@ const Search = (props: RouteComponentProps<{}>): React.ReactElement => {
   );
 };
 
-export default withRouter(Search);
+export default withRouter(SearchComponent);

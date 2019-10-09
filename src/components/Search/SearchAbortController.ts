@@ -6,7 +6,7 @@ class SearchAbortController {
   }
 
   public addController = (): AbortSignal => {
-    // For AbortController see: https://developer.mozilla.org/en-US/docs/Web/API/AbortController
+    // NOTE: For AbortController see: https://developer.mozilla.org/en-US/docs/Web/API/AbortController
     const controller = new window.AbortController();
     const signal = controller.signal;
     // Keep track of search requests.
