@@ -1,4 +1,4 @@
-import React, { KeyboardEvent, useState, useEffect } from 'react';
+import React, { KeyboardEvent, useState, useEffect, useRef } from 'react';
 import { withRouter, RouteComponentProps } from 'react-router-dom';
 import { css } from 'emotion';
 
@@ -10,7 +10,6 @@ import AutoComplete from '../AutoComplete';
 import colors from '../../utils/styles/colors';
 import { callSearch } from '../../utils/calls';
 import { useLoadAndError } from './useLoadAndError';
-import SearchAbortController from './SearchAbortController';
 
 export interface State {
   search: string;
@@ -30,6 +29,12 @@ export const SearchComponent = (props: RouteComponentProps<{}>): React.ReactElem
   const [search, setSearch] = useState<string>('');
   const [suggestions, setSuggestions] = useState<unknown[]>([]);
   const [loading, loaded, error, setLoadAndError] = useLoadAndError();
+  const requestList = useRef<AbortController[]>([]);
+
+  const cancelAllSearchRequests = (): void => {
+    requestList.current.forEach(request => request.abort());
+    requestList.current = [];
+  };
 
   useEffect(() => {
     /**
@@ -37,7 +42,7 @@ export const SearchComponent = (props: RouteComponentProps<{}>): React.ReactElem
      * so we cancel all the existing requests when input is empty.
      */
     if (search.length === 0) {
-      SearchAbortController.cancelAllSearchRequests();
+      cancelAllSearchRequests();
     }
   }, [search]);
   /**
@@ -84,7 +89,11 @@ export const SearchComponent = (props: RouteComponentProps<{}>): React.ReactElem
    */
   const handleFetchPackages = async ({ value }: { value: string }): Promise<void> => {
     try {
-      const signal = SearchAbortController.addController();
+      // NOTE: For AbortController see: https://developer.mozilla.org/en-US/docs/Web/API/AbortController
+      const controller = new window.AbortController();
+      const signal = controller.signal;
+      // Keep track of search requests.
+      requestList.current.push(controller);
       const suggestions = await callSearch(value, signal);
       // @ts-ignore
       setSuggestions(suggestions);
@@ -119,7 +128,7 @@ export const SearchComponent = (props: RouteComponentProps<{}>): React.ReactElem
     // stops event bubbling
     event.stopPropagation();
     setLoadAndError(false, false, false);
-    SearchAbortController.cancelAllSearchRequests();
+    cancelAllSearchRequests();
   };
 
   return (
